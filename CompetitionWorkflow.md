@@ -2,6 +2,61 @@
 
 This file documents the current end-to-end process for updating the competition workbook from a new Google Forms CSV export, validating the workbook, and generating the downstream PDF, CSV, and value-only Excel outputs.
 
+## RATS Input Version
+
+The separate workbook `UKMARS Contest Registration Processing - RATS.xlsx` accepts
+the ten-column format in `RATS-full entry_extract.csv`. The original Google Forms
+workbook and its workflow below remain available.
+
+The checked-in RATS CSV contains synthetic example contestants, robots, and IDs.
+Its event distribution and repeated entries are retained for realistic testing.
+
+For the RATS workbook:
+
+1. Clear previous data below the headers in columns `A:J` of `RATS Entry Import`.
+2. Paste the complete new CSV, including headers, starting at `A1`. Keep its
+   column order. Capacity is 1,000 contest entry rows.
+3. Recalculate in desktop Excel with `Ctrl+Alt+F9`, then save.
+4. Check `Value Copied Summary`: imported entry rows should match the CSV;
+   entries requiring attention, nonblank cells beyond capacity, and duplicate
+   entry IDs should all be zero. Inspect `RobotLookup Clean` column A for issues.
+5. Spot-check the competition sheets and remaining entrant extracts. Save and
+   close Excel before running exports.
+
+Each source row is one robot's entry in one contest. `Contestant` supplies the
+builder, `Cont_Level` supplies Junior/Senior, and `Challenge` selects the event
+through the editable `Event Mapping` sheet. `Non Contact Wall Follower` maps to
+`WF`; `Half Size Line Follower` maps to `HLF` even where the source `Contest`
+name simply says Line Follower. Unknown challenges are flagged for attention.
+Source `Class` (for example `Final`) is metadata, not the Junior/Senior level.
+Email is unavailable and stays blank in the entrant extracts.
+
+This version removes `Mouse Query`, `RATS DATA`, the older `RobotLookup`, and
+`Denormalised Responses`. It retains the 14 competition sheets and the Drag
+Race, Line Following, and Pursuit extracts. Pursuit sheets are empty for the
+supplied sample because it has no Pursuit entries. Existing/new robot matching
+is replaced by input validation. IDs and other source metadata are retained in
+`RobotLookup Clean`.
+
+Run exports from Windows PowerShell, using separate output folders:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\export_competition_pdfs.ps1 -WorkbookPath ".\UKMARS Contest Registration Processing - RATS.xlsx" -OutputFolder ".\competition-pdfs-rats"
+powershell -ExecutionPolicy Bypass -File .\export_competition_csvs.ps1 -WorkbookPath ".\UKMARS Contest Registration Processing - RATS.xlsx" -OutputFolder ".\competition-csvs-rats"
+```
+
+Run value-only exports from WSL/Linux after Excel has recalculated and saved:
+
+```bash
+./.venv-linux/bin/python export_value_workbooks.py --workbook "UKMARS Contest Registration Processing - RATS.xlsx" --competition-output-dir competition-excels-rats --dataextract-output-dir dataextracts-rats
+```
+
+The exporter omits `RATS DATA` for this version and still requires it for the
+original workbook. To rebuild the RATS workbook from the original template and
+CSV in WSL/Linux, use `./.venv-linux/bin/python create_rats_workbook.py`. The
+builder refuses to overwrite an existing output; pass `--output` with a new
+filename when rebuilding. A rebuilt workbook needs recalculation in Excel.
+
 ## Core Files
 
 - Workbook: [UKMARS Contest Registration Processing.xlsx](./UKMARS%20Contest%20Registration%20Processing.xlsx)

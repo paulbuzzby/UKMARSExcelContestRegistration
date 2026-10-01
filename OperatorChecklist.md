@@ -2,6 +2,13 @@
 
 Use this as the short day-of-use process.
 
+For `UKMARS Contest Registration Processing - RATS.xlsx`, use the **RATS Input
+Version** section of [CompetitionWorkflow.md](./CompetitionWorkflow.md).
+Paste into `RATS Entry Import`, clear the previous data first, recalculate and
+save, and check the validation counts in `Value Copied Summary`. This version
+has three entrant extracts and no `RATS DATA` output. The checklist below is for
+the original Google Forms workbook.
+
 ## Update The Workbook
 
 1. Export the latest Google Forms responses as CSV.

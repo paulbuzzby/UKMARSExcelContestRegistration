@@ -148,6 +148,8 @@ def export_single_sheet_workbooks(source_wb, output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     for sheet_name in DATA_EXTRACT_SHEETS:
         if sheet_name not in source_wb.sheetnames:
+            if sheet_name == "RATS DATA" and "RATS Entry Import" in source_wb.sheetnames:
+                continue
             raise KeyError(f"Missing sheet in source workbook: {sheet_name}")
         output_wb = create_blank_workbook()
         target_ws = output_wb.create_sheet(title=sheet_name)

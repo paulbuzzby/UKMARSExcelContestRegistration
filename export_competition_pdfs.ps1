@@ -28,7 +28,40 @@ function Invoke-ExcelCall {
             if ($_.Exception.HResult -ne -2147418111 -or $attempt -eq $MaxAttempts) {
                 throw
             }
-            Start-Sleep -Milliseconds ($DelayMs * $attempt)
+        }
+        catch [System.Management.Automation.RuntimeException] {
+            # Excel can briefly return a null object instead of a busy COM error.
+            if ($attempt -eq $MaxAttempts -or
+                (-not $_.Exception.Message.Contains("null-valued expression") -and
+                 -not $_.Exception.Message.Contains("Excel returned a null range"))) {
+                throw
+            }
+        }
+        Start-Sleep -Milliseconds ($DelayMs * $attempt)
+    }
+}
+
+function Get-RangeValues {
+    param($Worksheet, [string]$Address)
+
+    return Invoke-ExcelCall {
+        $range = $null
+        try {
+            $range = $Worksheet.Range($Address)
+            if ($null -eq $range) {
+                throw "Excel returned a null range: $Address"
+            }
+            # Wrap the array so PowerShell does not flatten Excel's two-dimensional values.
+            $values = $range.Value2
+            if ($null -eq $values) {
+                throw "Excel returned a null range value: $Address"
+            }
+            [PSCustomObject]@{ Values = $values }
+        }
+        finally {
+            if ($null -ne $range) {
+                [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($range)
+            }
         }
     }
 }
@@ -54,8 +87,9 @@ function Get-LastHeaderColumn {
 
     $lastCol = 0
     $usedCols = [Math]::Max((Invoke-ExcelCall { $Worksheet.UsedRange.Columns.Count }), 1)
+    $headers = (Get-RangeValues -Worksheet $Worksheet -Address "A4:$((Get-ColumnLetter $usedCols))4").Values
     for ($col = 1; $col -le $usedCols; $col++) {
-        $header = Invoke-ExcelCall { $Worksheet.Cells.Item(4, $col).Text }
+        $header = if ($usedCols -eq 1) { $headers } else { $headers[1, $col] }
         $isHidden = Invoke-ExcelCall { $Worksheet.Columns.Item($col).Hidden }
         if (-not $isHidden -and -not [string]::IsNullOrWhiteSpace($header)) {
             $lastCol = $col
@@ -77,13 +111,26 @@ function Get-LastDataRow {
     )
 
     $lastRow = 0
+    $values = (Get-RangeValues -Worksheet $Worksheet -Address "A${StartRow}:A${EndRow}").Values
     for ($row = $StartRow; $row -le $EndRow; $row++) {
-        $value = Invoke-ExcelCall { $Worksheet.Cells.Item($row, 1).Text }
+        $value = if ($StartRow -eq $EndRow) { $values } else { $values[($row - $StartRow + 1), 1] }
         if (-not [string]::IsNullOrWhiteSpace($value)) {
             $lastRow = $row
         }
     }
     return $lastRow
+}
+
+function Get-ColumnLetter {
+    param([int]$Column)
+
+    $letter = ""
+    while ($Column -gt 0) {
+        $Column--
+        $letter = [string][char](65 + ($Column % 26)) + $letter
+        $Column = [int][Math]::Floor($Column / 26)
+    }
+    return $letter
 }
 
 $competitionSheets = @(
@@ -114,10 +161,10 @@ $workbook = $null
 
 try {
     $excel = New-Object -ComObject Excel.Application
-    $excel.Visible = $false
-    $excel.DisplayAlerts = $false
-    $excel.ScreenUpdating = $false
-    $excel.EnableEvents = $false
+    Invoke-ExcelCall { $excel.Visible = $false }
+    Invoke-ExcelCall { $excel.DisplayAlerts = $false }
+    Invoke-ExcelCall { $excel.ScreenUpdating = $false }
+    Invoke-ExcelCall { $excel.EnableEvents = $false }
 
     $workbook = Invoke-ExcelCall { $excel.Workbooks.Open($resolvedWorkbookPath, 0, $true) }
 
@@ -144,22 +191,20 @@ try {
 
         Invoke-ExcelCall { $worksheet.Calculate() }
 
-        $firstRobot = Invoke-ExcelCall { $worksheet.Range("A5").Text }
-        if ([string]::IsNullOrWhiteSpace($firstRobot)) {
+        $lastDataRow = Get-LastDataRow -Worksheet $worksheet
+        if ($lastDataRow -lt 5) {
             Write-Host "Skipping empty sheet: $sheetName"
             continue
         }
 
         $lastHeaderColumn = Get-LastHeaderColumn -Worksheet $worksheet
-        $lastDataRow = Get-LastDataRow -Worksheet $worksheet
 
         if ($lastHeaderColumn -lt 1 -or $lastDataRow -lt 5) {
             Write-Host "Skipping sheet with no printable area: $sheetName"
             continue
         }
 
-        $bottomRightAddress = Invoke-ExcelCall { $worksheet.Cells.Item($lastDataRow, $lastHeaderColumn).Address() }
-        $printArea = '$A$1:' + $bottomRightAddress
+        $printArea = '$A$1:$' + (Get-ColumnLetter $lastHeaderColumn) + '$' + $lastDataRow
 
         Invoke-ExcelCall { $worksheet.PageSetup.PrintArea = $printArea }
         Invoke-ExcelCall { $worksheet.PageSetup.Orientation = 2 }
@@ -179,11 +224,11 @@ try {
 }
 finally {
     if ($workbook -ne $null) {
-        $workbook.Close($false)
+        Invoke-ExcelCall { $workbook.Close($false) }
         [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($workbook)
     }
     if ($excel -ne $null) {
-        $excel.Quit()
+        Invoke-ExcelCall { $excel.Quit() }
         [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel)
     }
     [GC]::Collect()
